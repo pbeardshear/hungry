@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+</head>
+<body>
+
+	<div id="map"></div>
+	<div id="results">
+		<!-- Put the results here -->
+	</div>
+
+	<script src="http://cdn.peerjs.com/0.3/peer.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.8.3/underscore-min.js"></script>
+	<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAJOJK8AiY2ngLNcWHqDTorXzR7H4j0Cgw&libraries=places"></script>
+	<script src="https://code.jquery.com/jquery-1.12.0.min.js"></script>
+	<script>
+		// ~ Message format ~
+		// 
+		// {
+		// 	/// - Used by host to indicate how message should be interpreted
+		// 	type: '<string>',
+		//
+		// 	/// - Used by peers to group messages together
+		// 	key: '<string>',
+		//
+		// 	/// - Additional data provided by host/peer
+		// 	payload: '<object>'
+		//
+		// };
+
+
+		var config = { key: '1qt5p4czbv3x47vi' };
+		var hostID = '16-117186-955-3';
+
+
+		var host = new Peer(hostID, config);
+		var connections = {};
+		
+
+		host.on('open', function (id) {
+			console.log('Host connection opened.');
+		});
+
+		host.on('connection', function (conn) {
+			console.log('New connection to host:', conn.peer);
+
+			connections[conn.peer] = conn;
+
+
+			// Attach event listeners to new peer connections
+			conn.on('close', function () {
+				console.log('Connection to host cloesd:', conn.peer);
+				delete connections[conn.peer];
+			});
+
+
+			conn.on('open', function () {
+				send(conn, 'connections', Object.keys(connections));
+			});
+
+
+			// conn.on('data', function (data) {
+			// 	console.log('got data:', data);
+			// });
+
+			// Emit data to let connection know of other connections
+			broadcast('connections', Object.keys(connections));
+
+		});
+
+
+		function send(conn, type, message) {
+			console.groupCollapsed('Sending data to connection:', conn.peer);
+			console.log('Type:', type);
+			console.log('Data:', message);
+			console.groupEnd();
+
+			conn.send({
+				type: type,
+				payload: message
+			});
+		}
+
+
+		function broadcast(type, message) {
+			_.each(connections, function (conn) {
+				send(conn, type, message);
+			});
+		}
+
+
+
+		
+	</script>
+</body>
+</html>

@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<link rel="stylesheet" type="text/css" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css" />
+	<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.5.0/css/font-awesome.min.css">
+</head>
+<body>
+
+	<!-- Not used, just needed for places API -->
+	<div id="map"></div>
+
+	<main>
+
+		<section>
+			<h1>Great China <i class="fa fa-trophy"></i></h1>
+			<p>
+				($$$)  12 Shattuck Way, Berkeley, CA
+			</p>
+		</section>
+
+		<section>
+			<h2>Pasta Bene</h2>
+			<p>
+				($$$)  256 Telegraph Ave., Berkeley, CA
+			</p>
+		</section>
+
+		<section>
+			<h3>Ike's Place</h3>
+			<p>
+				($$$)  422 Broadway Ave., Oakland, CA
+			</p>
+		</section>
+
+		
+		
+	</main>
+
+	<script src="http://cdn.peerjs.com/0.3/peer.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.8.3/underscore-min.js"></script>
+	<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAJOJK8AiY2ngLNcWHqDTorXzR7H4j0Cgw&libraries=places"></script>
+	<script src="https://code.jquery.com/jquery-1.12.0.min.js"></script>
+	<script>
+		/**
+		 * Steps:
+		 * 
+		 * 1. User opens page
+		 * 2. Connect to host, get list of other connections
+		 * 3. All users mark themselves ready
+		 * 4. Request is made to Google/Yelp for places (only 1 should do this?)
+		 * 5. List of places to display is sent to all users
+		 * 6. Places are displayed to users in random order
+		 * 7. Users choose (yes/no) - results are sent to all other users
+		 * 8. Each user tallys up score and displays ranking
+		 */
+
+
+		// ~ Constants ~
+		var config = { key: '1qt5p4czbv3x47vi' };
+		var hostID = '16-117186-955-3';
+
+
+		// ~ Connection state ~
+		// Own connection object
+		var local = {};
+		var connections = {};
+		var signals = {};
+
+
+		// ~ Event pipes ~
+		// Handlers for events triggered on data connections with peers
+		var handlers = {
+			'data': [
+				function (conn, data) {
+					console.log('received data from conn:', conn.peer, data);
+				}
+			],
+
+			'open': [
+				function (conn) {
+					console.log('opened connection', conn);
+					conn.send({
+						payload: 'howdy!'
+					});
+				}
+			],
+
+			'close': []
+		};
+
+
+
+		// ~ Message format ~
+		// 
+		// {
+		// 	/// - Used by host to indicate how message should be interpreted
+		// 	type: '<string>',
+		//
+		// 	/// - Used by peers to group messages together
+		// 	key: '<string>',
+		//
+		// 	/// - Additional data provided by host/peer
+		// 	payload: '<object>'
+		//
+		// };
+
+		
+
+		/**
+		 * Handshake with server, connect to peers
+		 */
+		function initialize() {
+			var peer = new Peer(config);
+			var host = peer.connect(hostID);
+
+			peer.on('open', function (id) {
+				local.id = id;
+				signals.connectionOpen = true;
+
+				console.log('connection opened:', local.id);
+			});
+
+			peer.on('connection', function (conn) {
+				console.log('Connected to peer:', local.id, conn);
+
+				// conn.send(local.id + ': roger!');
+
+				conn.on('data', bindListener('data', conn));
+
+				// conn.on('data', function (data) {
+				// 	console.log('receiving data...', data);
+				// });
+			});
+
+			host.on('open', function () {
+				signals.hostConnection = true;
+			});
+
+			host.on('data', function (data) {
+				console.log('got data from host:', data);
+				switch (data.type) {
+					case 'connections':
+						_.each(data.payload, function (id) {
+							if (!(id in connections) && id !== local.id) {
+								console.log('new connections:', id, local.id);
+								var conn = peer.connect(id);
+
+								// Bind handlers to new connection
+								// _.each(handlers, function (_, key) {
+								// 	conn.on(key, bindListener(key, conn));
+								// });
+
+								// conn.on('data', function (data) {
+								// 	console.log('received data:', data);
+								// });
+
+								conn.on('open', bindListener('open', conn));
+								conn.on('close', bindListener('close', conn));
+
+								// conn.on('open', function () {
+								// 	console.log('connection open:', local.id, '=>', conn);
+								// 	conn.send('howdy!');
+								// });
+
+								connections[id] = conn;
+							}
+						});
+						break;
+					default:
+						console.warn('Got unknown data type from host:', data.type, data);
+						break;
+				}
+			});
+		}
+
+
+		/**
+		 * Send message to all peers
+		 */
+		function broadcast(key, message) {
+			_.each(connections, function (conn) {
+				conn.send({
+					key: key,
+					payload: message
+				});
+			});
+		}
+
+
+		/**
+		 * Execute callback when message is received from all peers
+		 * @arg {key} - identifier in the message to look for
+		 */
+		function funnel(key, callback) {
+			var slots = {};
+
+			// Add handler for key
+			handlers['data'].push(function (conn, data) {
+
+				if (data && data.key && data.key == key) {
+					slots[conn.id] = data.payload;
+				}
+
+				if (_.size(slots) == peerCount) {
+					callback(slots);
+					// Unregister listener
+					return false;
+				}
+			});
+		}
+
+
+
+		// ~ Utility functions ~
+
+		function bindListener(eventName, conn) {
+			console.log('binding event:', eventName);
+
+			// Return handler function that will iterate attached listeners when event is triggered
+			return function listener() {
+				var args = _.toArray(arguments);
+
+				console.log('received event:', eventName, 'from conn:', conn.peer);
+
+				handlers[eventName] = _.filter(handlers[eventName], function (fn) {
+					var result = fn.apply(null, [conn].concat(args));
+					// Clear handlers that return false
+					return result != false;
+				});
+			}
+		}
+
+
+
+		// Kickoff
+		initialize();
+
+
+
+		// hostConn.on('open', function (id) {
+		// 	// Add self to seen connections
+		// 	connections[id] = 1;
+		// 	console.log('host connection open!');
+		// });
+
+		// hostConn.on('data', function (data) {
+		// 	console.log('got data!', data);
+		// 	// Update list of connections, and connect to other hosts
+		// 	var updates = JSON.parse(data);
+		// 	_.each(updates, function (id) {
+		// 		if (!(id in connections)) {
+		// 			connections[id] = peer.connect(id);
+
+		// 			// TODO: setup listeners on connection
+		// 			connections[id].on('data', function (data) {
+		// 				var parsed = JSON.parse(data);
+		// 				// TODO: handle data updates
+		// 			});
+		// 		}
+		// 	})
+		// });
+
+
+
+		// Create a known unique peer id to check if other peers are available
+		// var peer;
+		// var safePeer = new Peer((new Date()).getTime(), config);
+
+		// safePeer.on('open', function (id) {
+		// 	var pick = randomPick(peers);
+		// 	// Try to connect to the peer to see if it is taken
+		// 	var conn = safePeer.connect(pick);
+
+		// 	// Wait a bit and see if the connection is successful
+		// 	setTimeout(function () {
+		// 		if (!conn.open) {
+		// 			// Go ahead with the pick
+		// 			peer = new Peer(pick, config);
+		// 			// Good to go!
+		// 		}
+		// 	}, 1000);
+		// });
+
+
+
+
+
+
+		// var map = new google.maps.Map(document.getElementById('map'));
+		// var container = $('#results');
+		// var template = _.template('<div>{{name}}</div><div>{{vicinity}}</div><img src="{{image}}"/>')
+
+		// var peer = new Peer({key: '1qt5p4czbv3x47vi'});
+
+		// peer.on('open', function (id) {
+		// 	console.log('open:', id);
+
+		// 	var conn = peer.connect('gibberish');
+
+		// 	console.log(conn);
+
+		// 	conn.on('open', function () {
+		// 		console.log('connection opened!');
+		// 	})
+
+		// 	conn.on('error', function () { 
+		// 		console.log('connection error!');
+		// 	})
+		// });
+
+		// peer.on('connection', function (connection) {
+		// 	console.log('connected:', connection);
+		// });
+
+
+		
+	</script>
+</body>
+</html>
