@@ -1,4 +1,5 @@
 from bottle import *
+from config import config
 
 import json
 import pprint
@@ -8,10 +9,10 @@ import oauth2
 
 
 # API Constants
-CONSUMER_KEY = 'P26GTaPRtv1oMwoCFz5RRQ'
-CONSUMER_SECRET = '8v3xI35dc8A_oY7Tb0c-4YQi-p0'
-TOKEN = 'wfNUzk63KVCyo3O_3Xa9eVLqJ0KyupNr'
-TOKEN_SECRET = 'NkE7PKugwUhwx_B5o4eEFUMduOA'
+CONSUMER_KEY = config['yelp']['CONSUMER_KEY']
+CONSUMER_SECRET = config['yelp']['CONSUMER_SECRET']
+TOKEN = config['yelp']['TOKEN']
+TOKEN_SECRET = config['yelp']['TOKEN_SECRET']
 
 consumer = oauth2.Consumer(CONSUMER_KEY, CONSUMER_SECRET)
 
@@ -33,6 +34,10 @@ def serve_host():
 @app.get('/testbed')
 def serve_testbed():
   return static_file('testbed.html', root='')  
+
+@app.get('/google/places.js')
+def redirect_google_places():
+  return redirect('https://maps.googleapis.com/maps/api/js?key=' + config['google']['API_KEY'] + '&libraries=places')
 
 
 @app.get('/search')
